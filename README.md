@@ -31,3 +31,51 @@ The GET method is already implemented for `ResourceView` and `IndexView`
 resources.
 
 See `example.py` for ... an example.
+
+About HAL
+---------
+
+See the [Internet Draft](http://tools.ietf.org/html/draft-kelly-json-hal-03)
+
+Paginated Hypermedia API Language (HAL) response example:
+
+    HTTP/1.0 200 OK
+    Content-Type: application/hal+json
+    Content-Length: 283
+    Server: Werkzeug/0.8.3 Python/2.7.2
+    Date: Thu, 12 Jul 2012 18:26:33 GMT
+    {
+      "_embedded": {
+        "workouts": [
+          {
+            "_links": {
+              "self": {
+                "href": "/workouts/1"
+              }
+            }
+            "id": 1,
+            "score": "1",
+          },
+          {
+            "_links": {
+              "self": {
+                "href": "/workouts/2"
+              }
+            }
+            "id": 2,
+            "score": "1",
+          }
+        ]
+      },
+      "_links": {
+        "self": {
+          "href": "/workouts"
+        },
+        "last": {
+          "href": "/workouts?page=3"
+        },
+        "next": {
+          "href": "/workouts?page=2"
+        }
+      }
+    }

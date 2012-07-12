@@ -178,7 +178,7 @@ class IndexView(QueryView):
     def links(self):
         page = self.build_page()
         view_name = request.url_rule.endpoint
-        _links = {'self': url_for(view_name)}
+        _links = {'self': {'href': url_for(view_name)}}
         if hasattr(self, "template"):
             _links['find'] = {'href': self.template, "templated": True}
         if page.pages > 0:
@@ -202,8 +202,7 @@ class IndexView(QueryView):
         return self.query().paginate(page_num, per_page=per_page)
 
     def get(self):
-        links = self.links()
-        embedded = self.embedded()
-        response = jsonify(_embedded={request.url_rule.endpoint: embedded},
-                           _links=links, **self.json)
-        return response, 200, {'Content-Type': self.content_type}
+        content = json.dumps(dict(
+            _embedded={request.url_rule.endpoint: self.embedded()},
+            _links=self.links(), **self.json))
+        return content, 200, {'Content-Type': self.content_type}
