@@ -1,43 +1,39 @@
 # encoding=utf-8
 
-from flask import jsonify, request, url_for, current_app
+from flask import request, url_for, current_app, make_response
 from flask.helpers import json
-from flask.exceptions import JSONBadRequest, JSONHTTPException
 from flask.views import MethodView
 
 from dictshield.document import Document
 
-
-class UnprocessableJSONRequest(JSONHTTPException):
-
-    code = 422
-
-    def get_body(self, environ):
-        errors = self.get_description(environ)
-        return json.dumps(dict(errors=errors))
+_error_response_headers = {'Content-Type': 'application/json'}
 
 
 class FormView(MethodView):
     """
-    Validate the submission of new resources or updates to existing resources.
-    Subclass and add the form fields you wish to validate against. PATCH can
-    validate partial updates as it should.
+    Validates form API requests. Subclass and add the form fields you wish to
+    validate against. PATCH validates partial updates whereas POST validates
+    that all required fields are present.
+
+    `fields` is a mapping of exposed field names and dictshield The values are
+    instances of `dictshield.fields.BaseField` to validate against.
 
     """
 
-    methods = ['POST', 'PATCH']
-
     fields = {}
 
-    @property
-    def document(self):
-        cls = type(self.__class__.__name__ + "Document", (Document, ), self.fields)
-        return cls(**request.json)
+    def __init__(self, document=None):
+        if document is None:
+            cls_name = self.__class__.__name__ + "Document"
+            self.document = type(cls_name, (Document, ), self.fields)
+        else:
+            if not isinstance(document, Document):
+                raise TypeError("Form documents must be instances of `dictshield.document.Document`")
+            self.document = document
 
     @property
     def clean(self):
-        filtered = self.document.to_python()  # Still includes dictshield internals
-        return self.document.make_json_ownersafe(filtered, encode=False)
+        return self.document.make_ownersafe(request.json)
 
     def validate(self):
         """
@@ -49,40 +45,34 @@ class FormView(MethodView):
             validate = self.document.validate_class_partial
         else:
             validate = self.document.validate_class_fields
-        self.errors = validate(request.json.copy(), validate_all=True) or None
+        self.errors = validate(request.json, validate_all=True) or None
         return not bool(self.errors)
 
     def error_response(self):
-        errors = dict([(e.field_name, e.reason) for e in self.errors])
-        raise UnprocessableJSONRequest(errors)
+        """
+        Return a basic application/json response with status code 422 to inform
+        the consumer of validation errors in the form request.
+        """
+        errors = dict([(e.field_name, e.reason) for e in self.errors])  # TODO what about multiple errors per field
+        content = json.dumps(dict(message="Validation error", errors=errors))
+        return make_response(content, 422, _error_response_headers)
 
     def dispatch_request(self, *args, **kwargs):
-        if not request.json:
-            raise JSONBadRequest()
         if not self.validate():
             return self.error_response()
         return super(FormView, self).dispatch_request(*args, **kwargs)
 
-    def options(self):
-        """Inform client that PATCH documents should be utf-8 JSON. """
-        return None, 200, {
-            'Accept-Patch': 'application/json;charset=utf-8',
-            'Allow': ', '.join(self.methods)}
+    def schema_response(self):
+        """Return a schema+json response for the document. """
+        return self.document.to_jsonschema(), 200, {
+            'Content-Type': 'application/schema+json',
+            'Accept': 'application/json; charset=utf-8'}
 
 
 class QueryView(MethodView):
     """
-    Add `url_kwargs` to the view class instance.
-     The
-    endpoint name is what the resource name will be exposed as to the API
-    consumer. See "workouts":
-
-    {
-      "_embedded": {
-        "workouts": [{
-            "score": 220
-        }, ... ]
-    }
+    Add `url_kwargs` to the view class instance. The HTTP method class methods
+    do *not* receive the args and kwargs from the Route.
 
     """
 
@@ -93,12 +83,7 @@ class QueryView(MethodView):
 
 class ResourceView(QueryView):
 
-    methods = ['GET']
     content_type = 'application/hal+json'
-
-    @property
-    def query(self):
-        return self.query().filter_by(**self.url_kwargs).first_or_404()
 
     def get_url(self):
         if hasattr(self, "url"):
@@ -121,7 +106,7 @@ class ResourceView(QueryView):
     @classmethod
     def as_resource(cls, endpoint, model_instance=None):
         # Instantiate from endpoint and object. Traverse the app url_map and
-        # finds a best match for the subresource URL.
+        # find a best match for the subresource URL.
         def get_url_kwargs():
             for rule in current_app.url_map._rules_by_endpoint[endpoint]:
                 if 'GET' in rule.methods and rule.arguments:
@@ -133,7 +118,7 @@ class ResourceView(QueryView):
         self.url_kwargs = dict(get_url_kwargs())
         self.url = url_for(endpoint, **self.url_kwargs)
         if model_instance is not None:
-            # Avoid n+1 querying
+            # Avoid n+1 querying by settings `query` to the instance
             self.query = lambda: model_instance
         return self
 
@@ -157,7 +142,6 @@ class IndexView(QueryView):
 
     """
 
-    methods = ['GET']
     content_type = 'application/hal+json'
 
     per_page = 40
@@ -170,38 +154,33 @@ class IndexView(QueryView):
 
     @property
     def json(self):
-        return {}
+        return {'total': self.page.total, 'per_page': self.page.per_page}
 
     def query(self):
         raise NotImplementedError()
 
     def links(self):
-        page = self.build_page()
         view_name = request.url_rule.endpoint
         _links = {'self': {'href': url_for(view_name)}}
-        if hasattr(self, "template"):
-            _links['find'] = {'href': self.template, "templated": True}
-        if page.pages > 0:
-            _links['last'] = {'href': url_for(view_name, page=page.pages)}
-        if page.has_next:
-            _links['next'] = {'href': url_for(view_name, page=page.next_num)}
-        if page.has_prev:
-            _links['previous'] = {'href': url_for(view_name, page=page.previous_num)}
+        if self.page.pages > 0:
+            _links['last'] = {'href': url_for(view_name, page=self.page.pages)}
+        if self.page.has_next:
+            _links['next'] = {'href': url_for(view_name, page=self.page.next_num)}
+        if self.page.has_prev:
+            _links['previous'] = {'href': url_for(view_name, page=self.page.prev_num)}
         return _links
 
     def embedded(self):
         endpoint = self.subresource_endpoint
-        subresource = current_app.view_functions[endpoint].view_class
-        return [subresource.as_resource(endpoint, item).json \
-            for item in self.build_page().items]
+        resource = current_app.view_functions[endpoint].view_class
+        return [resource.as_resource(endpoint, item).json \
+            for item in self.page.items]
 
-    def build_page(self):
+    def get(self):
         page_num = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', self.per_page))
         per_page = min(per_page, self.per_page)  # Upper limit
-        return self.query().paginate(page_num, per_page=per_page)
-
-    def get(self):
+        self.page = self.query().paginate(page_num, per_page=per_page)
         content = json.dumps(dict(
             _embedded={request.url_rule.endpoint: self.embedded()},
             _links=self.links(), **self.json))
