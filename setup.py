@@ -24,7 +24,7 @@ setup(
         'Topic :: Internet :: WWW/HTTP :: Dynamic Content',
         'Topic :: Software Development :: Libraries :: Python Modules'
     ],
-    packages=['flask_halalchemy'],
+    py_modules=['flask_halalchemy'],
     include_package_data=True,
     zip_safe=False,
     platforms='any'
