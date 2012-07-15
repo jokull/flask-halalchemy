@@ -147,9 +147,6 @@ class IndexView(QueryView):
     per_page = 40
 
     def __init__(self, subresource_endpoint=None):
-        if subresource_endpoint is None:
-            raise TypeError("IndexView must be instantiated with a resource instance. ex: "
-                            "`IndexView.as_view(Model, 'things', subresource_endpoint='thing')`")
         self.subresource_endpoint = subresource_endpoint
 
     @property
@@ -163,7 +160,10 @@ class IndexView(QueryView):
         view_name = request.url_rule.endpoint
         _links = {'self': {'href': url_for(view_name)}}
         if self.page.pages > 0:
-            _links['last'] = {'href': url_for(view_name, page=self.page.pages)}
+            if self.page.page == self.page.pages:
+                _links['last'] = _links['self']
+            else:
+                _links['last'] = {'href': url_for(view_name, page=self.page.pages)}
         if self.page.has_next:
             _links['next'] = {'href': url_for(view_name, page=self.page.next_num)}
         if self.page.has_prev:
@@ -172,9 +172,12 @@ class IndexView(QueryView):
 
     def embedded(self):
         endpoint = self.subresource_endpoint
-        resource = current_app.view_functions[endpoint].view_class
-        return [resource.as_resource(endpoint, item).json \
-            for item in self.page.items]
+        if endpoint is None:
+            get_json = lambda o: o.json
+        else:
+            resource = current_app.view_functions[endpoint].view_class
+            get_json = lambda o: resource.as_resource(endpoint, o).json
+        return [get_json(item) for item in self.page.items]
 
     def get(self):
         page_num = int(request.args.get('page', 1))
