@@ -4,6 +4,7 @@ from flask import request, url_for, current_app, make_response
 from flask.helpers import json
 from flask.views import MethodView
 
+from dictshield.base import ShieldDocException
 from dictshield.document import Document
 
 _error_response_headers = {'Content-Type': 'application/json'}
@@ -21,31 +22,45 @@ class FormView(MethodView):
     """
 
     fields = {}
+    validate_on_methods = ['POST', 'PATCH', 'PUT']
 
     def __init__(self, document=None):
         if document is None:
             cls_name = self.__class__.__name__ + "Document"
             self.document = type(cls_name, (Document, ), self.fields)
         else:
-            if not isinstance(document, Document):
+            if not issubclass(document, Document):
                 raise TypeError("Form documents must be instances of `dictshield.document.Document`")
             self.document = document
 
     @property
+    def data(self):
+        return request.json or request.form.to_dict()
+
+    @property
     def clean(self):
-        return self.document.make_ownersafe(request.json)
+        return self.document.make_ownersafe(self.document(**self.data).to_python())
 
     def validate(self):
         """
         Sets an error attribute with a `field_name`: message dictionary.
         Returns `True` if valid and `False` if `errors` is non-empty.
+
+        For some fucked up reason dictshield has completely different ways to
+        validate partial and object integrity updates.
         """
+
         if request.method == "PATCH":
             # Allow partial documents when PATCH’ing
             validate = self.document.validate_class_partial
+            self.errors = validate(self.data, validate_all=True)
         else:
-            validate = self.document.validate_class_fields
-        self.errors = validate(request.json, validate_all=True) or None
+            try:
+                self.document(**self.data).validate(validate_all=True)
+            except ShieldDocException, e:
+                self.errors = e.error_list
+            else:
+                self.errors = None
         return not bool(self.errors)
 
     def error_response(self):
@@ -58,7 +73,7 @@ class FormView(MethodView):
         return make_response(content, 422, _error_response_headers)
 
     def dispatch_request(self, *args, **kwargs):
-        if not self.validate():
+        if request.method in self.validate_on_methods and not self.validate():
             return self.error_response()
         return super(FormView, self).dispatch_request(*args, **kwargs)
 
