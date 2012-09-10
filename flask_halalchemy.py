@@ -4,6 +4,8 @@ from flask import request, url_for, current_app, make_response
 from flask.helpers import json
 from flask.views import MethodView
 
+from werkzeug.utils import cached_property
+
 from dictshield.base import ShieldDocException
 from dictshield.document import Document
 
@@ -33,11 +35,11 @@ class FormView(MethodView):
                 raise TypeError("Form documents must be instances of `dictshield.document.Document`")
             self.document = document
 
-    @property
+    @cached_property
     def data(self):
         return request.json or request.form.to_dict()
 
-    @property
+    @cached_property
     def clean(self):
         return self.document.make_ownersafe(self.document(**self.data).to_python())
 
