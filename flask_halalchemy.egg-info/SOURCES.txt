@@ -1,7 +1,0 @@
-flask_halalchemy.py
-setup.py
-flask_halalchemy.egg-info/PKG-INFO
-flask_halalchemy.egg-info/SOURCES.txt
-flask_halalchemy.egg-info/dependency_links.txt
-flask_halalchemy.egg-info/not-zip-safe
-flask_halalchemy.egg-info/top_level.txt
