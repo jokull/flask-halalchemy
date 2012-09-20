@@ -108,9 +108,9 @@ class ResourceView(QueryView):
         return request.path
 
     def links(self):
-        links = {'self': {'href': self.get_url()}}
+        links = [{'self': {'href': self.get_url()}}]
         if callable(getattr(self.query(), "links", None)):
-            links.update(self.query().links())
+            links += self.query().links()
         return links
 
     @property
